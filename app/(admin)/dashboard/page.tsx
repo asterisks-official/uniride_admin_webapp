@@ -14,6 +14,8 @@ import {
   ShieldCheckIcon,
   ArrowRightIcon,
 } from '@heroicons/react/24/outline';
+import { StarIcon } from '@heroicons/react/24/outline';
+import { Sparkline } from '@/components/charts/Sparkline';
 
 interface DashboardStats {
   totalUsers: number;
@@ -40,11 +42,21 @@ interface ActivityItem {
   link?: string;
 }
 
+interface Metrics {
+  ridesSeries: Array<{ date: string; created: number; completed: number; cancelled: number }>;
+  earningsSeries: Array<{ date: string; total: number; platformFee: number }>;
+  completionRate30d: number;
+  avgRating30d: number;
+  rangeDays: number;
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [trustDistribution, setTrustDistribution] = useState<TrustDistribution | null>(null);
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +65,12 @@ export default function DashboardPage() {
       fetchDashboardData();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [days]);
 
   const fetchDashboardData = async () => {
     try {
@@ -65,7 +83,7 @@ export default function DashboardPage() {
       }
 
       // Fetch dashboard stats
-      const statsResponse = await fetch('/api/dashboard/stats', {
+      const statsResponse = await fetch(`/api/dashboard/stats?days=${days}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -83,6 +101,7 @@ export default function DashboardPage() {
           ...item,
           timestamp: new Date(item.timestamp),
         })));
+        setMetrics(statsData.data.metrics);
       }
     } catch (err: any) {
       console.error('Failed to fetch dashboard data:', err);
@@ -189,6 +208,85 @@ export default function DashboardPage() {
           color="gray"
           loading={loading}
         />
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <StatCard
+          title="Completion Rate (30d)"
+          value={metrics?.completionRate30d ?? 0}
+          icon={ShieldCheckIcon}
+          color="green"
+          loading={loading}
+        />
+        <StatCard
+          title="Avg Rating (30d)"
+          value={metrics?.avgRating30d ?? 0}
+          icon={StarIcon}
+          color="yellow"
+          loading={loading}
+        />
+      </div>
+
+      {/* Activity & Earnings */}
+      <div className="bg-white rounded-lg shadow p-6 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-gray-900">Activity & Earnings</h3>
+            {loading && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-700">Range</label>
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              onBlur={fetchDashboardData}
+              className="border border-gray-300 rounded-md text-sm py-1 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={7}>7 days</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+            </select>
+          </div>
+        </div>
+
+        {loading || !metrics ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="h-40 bg-gray-100 rounded-lg animate-pulse" />
+            <div className="h-40 bg-gray-100 rounded-lg animate-pulse" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="p-4 border rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-700">Rides</p>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600"></span>Created</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-600"></span>Completed</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600"></span>Cancelled</span>
+                </div>
+              </div>
+              <div className="flex gap-4 items-end">
+                <Sparkline values={metrics.ridesSeries.map((d) => d.created)} colorClass="stroke-blue-600" fillClass="fill-blue-600" />
+                <Sparkline values={metrics.ridesSeries.map((d) => d.completed)} colorClass="stroke-green-600" fillClass="fill-green-600" />
+                <Sparkline values={metrics.ridesSeries.map((d) => d.cancelled)} colorClass="stroke-red-600" fillClass="fill-red-600" />
+              </div>
+            </div>
+            <div className="p-4 border rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-gray-700">Earnings</p>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-600"></span>Total</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-600"></span>Platform Fee</span>
+                </div>
+              </div>
+              <div className="flex gap-4 items-end">
+                <Sparkline values={metrics.earningsSeries.map((d) => d.total)} colorClass="stroke-purple-600" fillClass="fill-purple-600" />
+                <Sparkline values={metrics.earningsSeries.map((d) => d.platformFee)} colorClass="stroke-gray-600" fillClass="fill-gray-600" />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -327,8 +425,8 @@ export default function DashboardPage() {
               return (
                 <div key={activity.id} className="p-6 hover:bg-gray-50 transition-colors">
                   {activity.link ? (
-                    <Link href={activity.link} className="flex items-start gap-4">
-                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Link href={activity.link} className="flex items-start gap-4 group">
+                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105">
                         <Icon className="w-5 h-5 text-gray-600" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -341,7 +439,7 @@ export default function DashboardPage() {
                     </Link>
                   ) : (
                     <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform">
                         <Icon className="w-5 h-5 text-gray-600" />
                       </div>
                       <div className="flex-1 min-w-0">

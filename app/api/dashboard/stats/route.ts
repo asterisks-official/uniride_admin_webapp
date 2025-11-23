@@ -24,6 +24,10 @@ export async function GET(request: NextRequest) {
 
     await assertAdmin(token);
 
+    const searchParams = request.nextUrl.searchParams;
+    const daysParam = Number(searchParams.get('days') || '7');
+    const rangeDays = Number.isFinite(daysParam) ? Math.min(30, Math.max(7, daysParam)) : 7;
+
     // Fetch all stats in parallel
     const [
       totalUsersResult,
@@ -33,6 +37,10 @@ export async function GET(request: NextRequest) {
       pendingVerificationsResult,
       trustDistributionResult,
       recentActivityResult,
+      rideSeriesResult,
+      earningsSeriesResult,
+      completionRateResult,
+      avgRating30dResult,
     ] = await Promise.allSettled([
       getTotalUsers(),
       getActiveRides(),
@@ -41,6 +49,10 @@ export async function GET(request: NextRequest) {
       getPendingVerifications(),
       getTrustDistribution(),
       getRecentActivity(),
+      getRideSeries(rangeDays),
+      getEarningsSeries(rangeDays),
+      getCompletionRate30d(),
+      getAvgRating30d(),
     ]);
 
     // Extract values or use defaults
@@ -61,12 +73,21 @@ export async function GET(request: NextRequest) {
       ? recentActivityResult.value 
       : [];
 
+    const metrics = {
+      ridesSeries: rideSeriesResult.status === 'fulfilled' ? rideSeriesResult.value : [],
+      earningsSeries: earningsSeriesResult.status === 'fulfilled' ? earningsSeriesResult.value : [],
+      completionRate30d: completionRateResult.status === 'fulfilled' ? completionRateResult.value : 0,
+      avgRating30d: avgRating30dResult.status === 'fulfilled' ? avgRating30dResult.value : 0,
+      rangeDays,
+    };
+
     return NextResponse.json({
       ok: true,
       data: {
         stats,
         trustDistribution,
         recentActivity,
+        metrics,
       },
     });
   } catch (error: any) {
@@ -322,4 +343,91 @@ async function getRecentActivity(): Promise<any[]> {
       link,
     };
   });
+}
+
+function getDateDaysAgo(days: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - (days - 1));
+  return d;
+}
+
+function formatDateKey(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+async function getRideSeries(days: number): Promise<Array<{ date: string; created: number; completed: number; cancelled: number }>> {
+  const startDate = getDateDaysAgo(days);
+  const { data, error } = await supabase
+    .from('rides')
+    .select('created_at, completed_at, cancelled_at')
+    .gte('created_at', startDate.toISOString());
+  if (error) return [];
+  const series: Record<string, { created: number; completed: number; cancelled: number }> = {};
+  for (let i = 0; i < days; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    series[formatDateKey(d)] = { created: 0, completed: 0, cancelled: 0 };
+  }
+  (data || []).forEach((row: any) => {
+    const cKey = formatDateKey(new Date(row.created_at));
+    if (series[cKey]) series[cKey].created++;
+    if (row.completed_at) {
+      const compKey = formatDateKey(new Date(row.completed_at));
+      if (series[compKey]) series[compKey].completed++;
+    }
+    if (row.cancelled_at) {
+      const canKey = formatDateKey(new Date(row.cancelled_at));
+      if (series[canKey]) series[canKey].cancelled++;
+    }
+  });
+  return Object.entries(series).map(([date, v]) => ({ date, ...v }));
+}
+
+async function getEarningsSeries(days: number): Promise<Array<{ date: string; total: number; platformFee: number }>> {
+  const startDate = getDateDaysAgo(days);
+  const { data, error } = await supabase
+    .from('ride_transactions')
+    .select('created_at, amount, platform_fee')
+    .gte('created_at', startDate.toISOString());
+  if (error) return [];
+  const series: Record<string, { total: number; platformFee: number }> = {};
+  for (let i = 0; i < days; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    series[formatDateKey(d)] = { total: 0, platformFee: 0 };
+  }
+  (data || []).forEach((row: any) => {
+    const key = formatDateKey(new Date(row.created_at));
+    if (!series[key]) return;
+    series[key].total += Number(row.amount || 0);
+    series[key].platformFee += Number(row.platform_fee || 0);
+  });
+  return Object.entries(series).map(([date, v]) => ({ date, ...v }));
+}
+
+async function getCompletionRate30d(): Promise<number> {
+  const startDate = getDateDaysAgo(30);
+  const { data, error } = await supabase
+    .from('rides')
+    .select('id, status, created_at')
+    .gte('created_at', startDate.toISOString());
+  if (error) return 0;
+  const total = (data || []).length;
+  const completed = (data || []).filter((r: any) => r.status === 'completed').length;
+  if (total === 0) return 0;
+  return Math.round((completed / total) * 100);
+}
+
+async function getAvgRating30d(): Promise<number> {
+  const startDate = getDateDaysAgo(30);
+  const { data, error } = await supabase
+    .from('ride_ratings')
+    .select('rating, created_at')
+    .gte('created_at', startDate.toISOString());
+  if (error) return 0;
+  const ratings = (data || []).map((r: any) => Number(r.rating || 0));
+  if (ratings.length === 0) return 0;
+  const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+  return Math.round(avg * 10) / 10;
 }

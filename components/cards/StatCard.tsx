@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { ArrowUpIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
 
 interface StatCardProps {
@@ -23,6 +24,8 @@ export function StatCard({
   color = 'blue',
   loading = false,
 }: StatCardProps) {
+  const [displayValue, setDisplayValue] = useState<number | string>(value);
+  const prevValueRef = useRef<number | string>(value);
   const colorStyles = {
     blue: {
       bg: 'bg-blue-50',
@@ -58,6 +61,30 @@ export function StatCard({
 
   const styles = colorStyles[color];
 
+  useEffect(() => {
+    const isNumber = typeof value === 'number' && typeof prevValueRef.current === 'number';
+    if (!isNumber) {
+      setDisplayValue(value);
+      prevValueRef.current = value;
+      return;
+    }
+    const start = prevValueRef.current as number;
+    const end = value as number;
+    const duration = 800;
+    const startTime = performance.now();
+    let raf: number;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const current = Math.round(start + (end - start) * eased);
+      setDisplayValue(current);
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    prevValueRef.current = value;
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow p-6 animate-pulse">
@@ -73,11 +100,11 @@ export function StatCard({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow">
+    <div className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-all hover:-translate-y-0.5">
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-          <p className="text-3xl font-bold text-gray-900">{value}</p>
+          <p className="text-3xl font-bold text-gray-900">{displayValue}</p>
           
           {trend && (
             <div className="flex items-center gap-1 mt-2">
