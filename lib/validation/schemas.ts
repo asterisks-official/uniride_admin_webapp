@@ -340,6 +340,8 @@ export const broadcastNotificationSchema = z.object({
   userUids: z.array(z.string()).optional(),
   type: notificationTypeSchema.optional(),
   actionData: z.record(z.string(), z.any()).optional(),
+  launchUrl: z.string().url().optional(),
+  imageUrl: z.string().url().optional(),
 });
 
 export type BroadcastNotificationInput = z.infer<typeof broadcastNotificationSchema>;

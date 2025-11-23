@@ -28,6 +28,8 @@ export interface BroadcastPayload {
   userUids?: string[];
   type?: NotificationType;
   actionData?: Record<string, any>;
+  launchUrl?: string;
+  imageUrl?: string;
 }
 
 // Filters for listing notifications
@@ -72,6 +74,24 @@ export class NotificationsRepository {
     return (data || []).map(this.mapRowToNotification);
   }
 
+  async getBroadcastEligibility(segment?: string, userUids?: string[]): Promise<{ targetCount: number; playerIdCount: number; method: 'segments' | 'player_ids' | 'external_user_ids' }> {
+    let targetUserUids: string[] = [];
+    if (userUids && userUids.length > 0) {
+      targetUserUids = userUids;
+    } else if (segment) {
+      targetUserUids = await this.getUserUidsBySegment(segment);
+    } else {
+      targetUserUids = await this.getAllUserUids();
+    }
+
+    const { playerIds } = await this.getPushEligiblePlayersByUids(targetUserUids);
+    const method: 'segments' | 'player_ids' | 'external_user_ids' = (!segment && (!userUids || userUids.length === 0))
+      ? 'segments'
+      : (playerIds.length > 0 ? 'player_ids' : 'external_user_ids');
+
+    return { targetCount: targetUserUids.length, playerIdCount: playerIds.length, method };
+  }
+
   /**
    * Broadcast notification to targeted users
    * Creates notification records in database and sends push notifications via OneSignal
@@ -79,7 +99,7 @@ export class NotificationsRepository {
    * @param adminUid - UID of the admin performing the broadcast
    * @returns Promise that resolves when broadcast is complete
    */
-  async broadcastNotification(payload: BroadcastPayload, adminUid: string): Promise<void> {
+  async broadcastNotification(payload: BroadcastPayload, adminUid: string): Promise<{ targetCount: number; pushTargetCount: number; pushErrorMessage?: string }> {
     // Determine target user UIDs
     let targetUserUids: string[] = [];
 
@@ -98,10 +118,10 @@ export class NotificationsRepository {
       throw new Error('No target users found for broadcast');
     }
 
-    // Create notification records for all targeted users
+    const mappedType = this.mapToDbNotificationType(payload.type);
     const notificationInserts: NotificationInsert[] = targetUserUids.map((userUid) => ({
       user_uid: userUid,
-      type: (payload.type || 'admin_broadcast') as NotificationType,
+      type: mappedType as NotificationType,
       title: payload.title,
       message: payload.message,
       action_data: payload.actionData ? JSON.parse(JSON.stringify(payload.actionData)) : null,
@@ -117,17 +137,42 @@ export class NotificationsRepository {
       throw new Error(`Failed to insert notification records: ${insertError.message}`);
     }
 
-    // Send push notifications via OneSignal
+    let pushCount = 0;
+    let pushErrorMessage: string | undefined;
     try {
-      await this.sendPushNotification(
-        targetUserUids,
-        payload.title,
-        payload.message,
-        payload.actionData
-      );
+      const broadcastAll = !payload.segment && (!payload.userUids || payload.userUids.length === 0);
+      if (broadcastAll) {
+        const recipients = await this.sendPushNotification(
+          [],
+          payload.title,
+          payload.message,
+          payload.actionData,
+          payload.launchUrl,
+          payload.imageUrl,
+          ['Subscribed Users']
+        );
+        pushCount = recipients;
+      } else {
+        const { playerIds } = await this.getPushEligiblePlayersByUids(targetUserUids);
+        if (playerIds.length > 0 || (payload.userUids && payload.userUids.length > 0)) {
+          const recipients = await this.sendPushNotification(
+            playerIds,
+            payload.title,
+            payload.message,
+            payload.actionData,
+            payload.launchUrl,
+            payload.imageUrl,
+            undefined,
+            targetUserUids
+          );
+          pushCount = recipients >= 0 ? recipients : playerIds.length;
+        } else {
+          pushCount = 0;
+        }
+      }
     } catch (error) {
-      // Log push notification failure but don't fail the entire operation
       console.error('Failed to send push notifications:', error);
+      pushErrorMessage = error instanceof Error ? error.message : String(error);
     }
 
     // Log the broadcast action to audit log
@@ -141,10 +186,14 @@ export class NotificationsRepository {
           title: payload.title,
           message: payload.message,
           targetCount: targetUserUids.length,
+          pushTargetCount: pushCount,
           segment: payload.segment,
+          pushErrorMessage,
         },
       },
     });
+
+    return { targetCount: targetUserUids.length, pushTargetCount: pushCount, pushErrorMessage };
   }
 
   /**
@@ -190,30 +239,52 @@ export class NotificationsRepository {
    * @returns Promise that resolves when push notification is sent
    */
   private async sendPushNotification(
-    userUids: string[],
+    playerIds: string[],
     title: string,
     message: string,
-    data?: Record<string, any>
-  ): Promise<void> {
+    data?: Record<string, any>,
+    launchUrl?: string,
+    imageUrl?: string,
+    segments?: string[],
+    externalUserIds?: string[]
+  ): Promise<number> {
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
     const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 
     if (!apiKey || !appId) {
       console.warn('OneSignal credentials not configured, skipping push notification');
-      return;
+      return 0;
     }
 
     // OneSignal API endpoint
     const url = 'https://onesignal.com/api/v1/notifications';
 
     // Prepare the payload
-    const payload = {
+    const payload: any = {
       app_id: appId,
-      include_external_user_ids: userUids,
       headings: { en: title },
       contents: { en: message },
       data: data || {},
     };
+    if (segments && segments.length > 0) {
+      payload.included_segments = segments;
+    } else {
+      if (playerIds && playerIds.length > 0) {
+        payload.include_player_ids = playerIds;
+      }
+      if (externalUserIds && externalUserIds.length > 0) {
+        payload.include_external_user_ids = externalUserIds;
+      }
+    }
+
+    if (launchUrl) {
+      payload.url = launchUrl;
+    }
+    if (imageUrl) {
+      payload.big_picture = imageUrl;
+      payload.ios_attachments = { image: imageUrl };
+      payload.chrome_web_image = imageUrl;
+    }
 
     try {
       const response = await fetch(url, {
@@ -226,16 +297,116 @@ export class NotificationsRepository {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({} as any));
+        const shouldRetry = response.status === 401 || response.status === 403 || JSON.stringify(errorData).includes('Access denied');
+        if (shouldRetry) {
+          const retryResp = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (!retryResp.ok) {
+            const retryErr = await retryResp.json().catch(() => ({} as any));
+            throw new Error(`OneSignal API error: ${JSON.stringify(retryErr)}`);
+          }
+          const retryResult = await retryResp.json();
+          const recipients = typeof retryResult.recipients === 'number' ? retryResult.recipients : -1;
+          return recipients;
+        }
         throw new Error(`OneSignal API error: ${JSON.stringify(errorData)}`);
       }
 
       const result = await response.json();
       console.log('Push notification sent successfully:', result);
+      let recipients = typeof result.recipients === 'number' ? result.recipients : -1;
+
+      if (recipients === 0 && playerIds && playerIds.length > 0 && externalUserIds && externalUserIds.length > 0 && !segments) {
+        const fallbackPayload: any = {
+          app_id: appId,
+          headings: { en: title },
+          contents: { en: message },
+          data: data || {},
+          include_external_user_ids: externalUserIds,
+        };
+        if (launchUrl) fallbackPayload.url = launchUrl;
+        if (imageUrl) {
+          fallbackPayload.big_picture = imageUrl;
+          fallbackPayload.ios_attachments = { image: imageUrl };
+          fallbackPayload.chrome_web_image = imageUrl;
+        }
+
+        const fbResp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${apiKey}`,
+          },
+          body: JSON.stringify(fallbackPayload),
+        });
+
+        if (fbResp.ok) {
+          const fbRes = await fbResp.json();
+          recipients = typeof fbRes.recipients === 'number' ? fbRes.recipients : recipients;
+        }
+      }
+
+      return recipients;
     } catch (error) {
       console.error('Failed to send push notification via OneSignal:', error);
       throw error;
     }
+  }
+
+  private async getPushEligiblePlayersByUids(userUids: string[]): Promise<{ playerIds: string[] }> {
+    const { data, error } = await supabase
+      .from('users')
+      .select('uid, onesignal_player_id, push_notifications_enabled')
+      .in('uid', userUids)
+      .eq('push_notifications_enabled', true)
+      .not('onesignal_player_id', 'is', null);
+
+    if (error) {
+      throw new Error(`Failed to fetch push-eligible users: ${error.message}`);
+    }
+
+    const rows = (data || []) as { uid: string; onesignal_player_id: string | null; push_notifications_enabled: boolean }[];
+    const playerIds = rows.map(r => String(r.onesignal_player_id)).filter(Boolean);
+    return { playerIds };
+  }
+
+  private mapToDbNotificationType(type?: NotificationType): NotificationType {
+    const dbTypes: readonly string[] = [
+      'rideRequest',
+      'rideAccepted',
+      'rideCancelled',
+      'rideCompleted',
+      'newMessage',
+      'system',
+      'rideRequestAccepted',
+      'rideJoinRequest',
+      'rideJoined',
+      'rideOfferCancelled',
+      'rideOfferUpdated',
+      'rating_received',
+    ];
+
+    const isDbType = (val: string): boolean => dbTypes.includes(val);
+
+    if (type && isDbType(String(type))) return type as unknown as NotificationType;
+
+    const map: Record<string, string> = {
+      admin_broadcast: 'system',
+      ride_cancelled: 'rideCancelled',
+      ride_completed: 'rideCompleted',
+      request_accepted: 'rideRequestAccepted',
+      rating_received: 'rating_received',
+    };
+
+    const candidate = (type && map[String(type)]) || 'system';
+    return candidate as unknown as NotificationType;
   }
 
   /**

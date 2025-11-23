@@ -22,7 +22,13 @@ export default function NotificationsPage() {
   const [segment, setSegment] = useState('');
   const [userUids, setUserUids] = useState('');
   const [actionData, setActionData] = useState('');
+  const [launchUrl, setLaunchUrl] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   const [type, setType] = useState('admin_broadcast');
+  const [summary, setSummary] = useState<{ targetCount: number; playerIdCount: number; method: string } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [cred, setCred] = useState<{ authorized: boolean; appIdOk: boolean; appName?: string | null; keyFormat?: string } | null>(null);
+  const [credLoading, setCredLoading] = useState(false);
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -83,17 +89,60 @@ export default function NotificationsPage() {
     }
   };
 
+  const fetchEligibility = async () => {
+    setSummaryLoading(true);
+    setSummary(null);
+    try {
+      const params = new URLSearchParams();
+      if (segment.trim()) params.set('segment', segment.trim());
+      const uidList = userUids
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .join(',');
+      if (uidList) params.set('userUids', uidList);
+
+      const resp = await fetch(`/api/notifications/eligibility?${params.toString()}`);
+      const json = await resp.json();
+      if (json.ok) {
+        setSummary(json.data);
+      } else {
+        setSummary(null);
+      }
+    } catch (e) {
+      setSummary(null);
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const checkCredentials = async () => {
+    setCredLoading(true);
+    setCred(null);
+    try {
+      const resp = await fetch('/api/notifications/onesignal/credentials');
+      const json = await resp.json();
+      if (json.ok) {
+        setCred(json.data);
+      } else if (json.data) {
+        setCred(json.data);
+      } else {
+        setCred({ authorized: false, appIdOk: false });
+      }
+    } catch (_) {
+      setCred({ authorized: false, appIdOk: false });
+    } finally {
+      setCredLoading(false);
+    }
+  };
+
   const handleBroadcast = async () => {
     if (!title.trim() || !message.trim()) {
       alert('Please enter both title and message');
       return;
     }
 
-    // Validate that either segment or userUids is provided
-    if (!segment && !userUids.trim()) {
-      alert('Please select a segment or enter specific user UIDs');
-      return;
-    }
+    // If neither segment nor specific UIDs are provided, we will broadcast to all users
 
     setBroadcastLoading(true);
     try {
@@ -124,6 +173,13 @@ export default function NotificationsPage() {
         }
       }
 
+      if (launchUrl.trim()) {
+        payload.launchUrl = launchUrl.trim();
+      }
+      if (imageUrl.trim()) {
+        payload.imageUrl = imageUrl.trim();
+      }
+
       const response = await apiFetch('/api/notifications/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -136,7 +192,11 @@ export default function NotificationsPage() {
         throw new Error(result.error?.message || 'Failed to broadcast notification');
       }
 
-      alert('Notification broadcast successfully!');
+      const info = result.data || {};
+      const targetCountMsg = typeof info.targetCount === 'number' ? `Targets: ${info.targetCount}` : '';
+      const pushCountMsg = typeof info.pushTargetCount === 'number' ? (info.pushTargetCount >= 0 ? `, Push recipients: ${info.pushTargetCount}` : ', Push recipients: All (via OneSignal segments)') : '';
+      const pushErrorMsg = info.pushErrorMessage ? `\nPush error: ${info.pushErrorMessage}` : '';
+      alert(`Notification broadcast successfully! ${targetCountMsg}${pushCountMsg}${pushErrorMsg}`);
       
       // Reset form
       setTitle('');
@@ -144,6 +204,8 @@ export default function NotificationsPage() {
       setSegment('');
       setUserUids('');
       setActionData('');
+      setLaunchUrl('');
+      setImageUrl('');
       setType('admin_broadcast');
       setShowPreview(false);
 
@@ -203,6 +265,38 @@ export default function NotificationsPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <p className="text-xs text-gray-500 mt-1">{title.length}/100 characters</p>
+            </div>
+
+            <div className="mt-1 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={fetchEligibility}
+                className="px-3 py-2 bg-gray-100 text-gray-800 rounded-md border border-gray-300 hover:bg-gray-200"
+              >
+                Check Audience
+              </button>
+              {summaryLoading && <span className="text-sm text-gray-600">Computing…</span>}
+              {summary && (
+                <span className="text-sm text-gray-700">
+                  Method: {summary.method === 'segments' ? 'Segments (Subscribed Users)' : summary.method === 'player_ids' ? 'Player IDs' : 'External User IDs'}
+                  {' '}· Targets: {summary.targetCount} · Push-eligible devices: {summary.playerIdCount}
+                </span>
+              )}
+              <span className="mx-2 text-gray-300">|</span>
+              <button
+                type="button"
+                onClick={checkCredentials}
+                className="px-3 py-2 bg-gray-100 text-gray-800 rounded-md border border-gray-300 hover:bg-gray-200"
+              >
+                Check Credentials
+              </button>
+              {credLoading && <span className="text-sm text-gray-600">Checking…</span>}
+              {cred && (
+                <span className={`text-sm ${cred.authorized && cred.appIdOk ? 'text-green-700' : 'text-red-700'}`}>
+                  OneSignal: {cred.authorized && cred.appIdOk ? 'Valid' : 'Invalid'}{cred.appName ? ` (${cred.appName})` : ''}
+                  {cred.keyFormat ? ` · Key type: ${cred.keyFormat === 'app_key' ? 'App Key (wrong)' : cred.keyFormat === 'rest_key' ? 'REST Key' : 'Unknown'}` : ''}
+                </span>
+              )}
             </div>
 
             <div>
@@ -273,8 +367,37 @@ export default function NotificationsPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Leave empty to use segment targeting
+                  Leave empty to send to all users or choose a segment
                 </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Launch URL (optional)
+                </label>
+                <input
+                  type="url"
+                  value={launchUrl}
+                  onChange={(e) => setLaunchUrl(e.target.value)}
+                  placeholder="https://example.com/path"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Opens when user taps the notification</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Image URL (optional)
+                </label>
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Shown as large image (Android/iOS/Web)</p>
               </div>
             </div>
 
@@ -329,14 +452,23 @@ export default function NotificationsPage() {
                     <p className="text-sm font-medium text-gray-900">{title}</p>
                     <p className="text-sm text-gray-600 mt-1">{message}</p>
                     <p className="text-xs text-gray-400 mt-2">Just now</p>
+                    {launchUrl && (
+                      <p className="text-xs text-blue-600 mt-2">Launch: {launchUrl}</p>
+                    )}
+                    {imageUrl && (
+                      <p className="text-xs text-gray-600 mt-1">Image: {imageUrl}</p>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="mt-2 text-xs text-gray-600">
-                <p>Target: {segment ? getSegmentLabel(segment) : userUids ? 'Specific Users' : 'All Users'}</p>
-                {actionData && <p className="mt-1">Action Data: {actionData}</p>}
+                <div className="mt-2 text-xs text-gray-600">
+                  <p>Target: {segment ? getSegmentLabel(segment) : userUids ? 'Specific Users' : 'All Users'}</p>
+                  {actionData && <p className="mt-1">Action Data: {actionData}</p>}
+                  {summary && (
+                    <p className="mt-1">Audience: {summary.method} · Targets: {summary.targetCount} · Eligible: {summary.playerIdCount}</p>
+                  )}
+                </div>
               </div>
-            </div>
           )}
         </div>
 

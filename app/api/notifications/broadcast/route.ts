@@ -18,11 +18,11 @@ export async function POST(request: NextRequest) {
     const payload = broadcastNotificationSchema.parse(body);
 
     // Broadcast notification
-    await notificationsRepo.broadcastNotification(payload, decodedToken.uid);
+    const result = await notificationsRepo.broadcastNotification(payload, decodedToken.uid);
 
     return NextResponse.json({
       ok: true,
-      data: { message: 'Notification broadcast successfully' },
+      data: { message: 'Notification broadcast successfully', ...result },
     });
   } catch (error) {
     return handleError(error);
