@@ -22,6 +22,7 @@ export default function NotificationsPage() {
   const [segment, setSegment] = useState('');
   const [userUids, setUserUids] = useState('');
   const [actionData, setActionData] = useState('');
+  const [type, setType] = useState('admin_broadcast');
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -48,10 +49,8 @@ export default function NotificationsPage() {
         throw new Error(result.error?.message || 'Failed to fetch notifications');
       }
 
-      // Filter for admin broadcasts and limit to recent 20
-      const broadcasts = result.data
-        .filter((n: Notification) => n.type === 'admin_broadcast')
-        .slice(0, 20);
+      // Show most recent 20 of all types
+      const broadcasts = result.data.slice(0, 20);
       
       setRecentNotifications(broadcasts);
     } catch (err) {
@@ -128,7 +127,7 @@ export default function NotificationsPage() {
       const response = await apiFetch('/api/notifications/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, type }),
       });
 
       const result = await response.json();
@@ -145,6 +144,7 @@ export default function NotificationsPage() {
       setSegment('');
       setUserUids('');
       setActionData('');
+      setType('admin_broadcast');
       setShowPreview(false);
 
       // Refresh recent broadcasts
@@ -220,7 +220,7 @@ export default function NotificationsPage() {
               <p className="text-xs text-gray-500 mt-1">{message.length}/500 characters</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Target Segment
@@ -235,6 +235,29 @@ export default function NotificationsPage() {
                   <option value="low_trust">Low Trust Users (&lt;50)</option>
                   <option value="active_users">Active Users (5+ rides)</option>
                   <option value="new_users">New Users (&lt;3 rides)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notification Type
+                </label>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="admin_broadcast">Admin Broadcast</option>
+                  <option value="ride_matched">Ride Matched</option>
+                  <option value="ride_confirmed">Ride Confirmed</option>
+                  <option value="ride_cancelled">Ride Cancelled</option>
+                  <option value="ride_completed">Ride Completed</option>
+                  <option value="ride_started">Ride Started</option>
+                  <option value="payment_completed">Payment Completed</option>
+                  <option value="request_accepted">Request Accepted</option>
+                  <option value="request_declined">Request Declined</option>
+                  <option value="rating_received">Rating Received</option>
+                  <option value="report_resolved">Report Resolved</option>
                 </select>
               </div>
 
@@ -346,7 +369,12 @@ export default function NotificationsPage() {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h3 className="font-medium text-gray-900">{notification.title}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-medium text-gray-900">{notification.title}</h3>
+                        <span className={`px-2 py-1 text-xs rounded-full ${notification.type === 'admin_broadcast' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                          {notification.type}
+                        </span>
+                      </div>
                       <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
                       <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                         <span>User: {notification.userUid.substring(0, 8)}...</span>

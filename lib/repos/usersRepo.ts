@@ -24,6 +24,12 @@ export interface User {
   cancellations: number;
   lateCancellations: number;
   noShows: number;
+  verificationImages?: {
+    bikePhoto?: string;
+  };
+  verificationDetails?: {
+    vehicleModel?: string;
+  };
 }
 
 export interface UserFilters {
@@ -54,87 +60,50 @@ export interface PaginatedResult<T> {
 export class UsersRepository {
   /**
    * List users with filters and pagination
-   * Combines data from Firebase Auth, Firestore, and Supabase
+   * Uses Supabase view user_profiles_complete
    */
   async listUsers(
     filters: UserFilters = {},
     pagination: Pagination = { page: 1, pageSize: 50 }
   ): Promise<PaginatedResult<User>> {
-    // Get user stats from Supabase with trust score filters
     let query = supabase
-      .from('user_stats')
+      .from('user_profiles_complete')
       .select('*', { count: 'exact' });
 
-    // Apply trust score filters
     if (filters.trustMin !== undefined) {
       query = query.gte('trust_score', filters.trustMin);
     }
     if (filters.trustMax !== undefined) {
       query = query.lte('trust_score', filters.trustMax);
     }
+    if (filters.role) {
+      query = query.eq('role', filters.role);
+    }
+    if (filters.verificationStatus) {
+      query = query.eq('rider_verification_status', filters.verificationStatus);
+    }
+    if (filters.query) {
+      const search = filters.query;
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+    }
 
-    // Apply pagination
     const from = (pagination.page - 1) * pagination.pageSize;
     const to = from + pagination.pageSize - 1;
 
-    query = query
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    query = query.order('created_at', { ascending: false }).range(from, to);
 
-    const { data: statsData, error: statsError, count } = await query;
-
-    if (statsError) {
-      throw new Error(`Failed to fetch user stats: ${statsError.message}`);
+    const { data, error, count } = await query;
+    if (error) {
+      throw new Error(`Failed to fetch users: ${error.message}`);
     }
 
+    const rows = (data || []) as any[];
+    const resultUsers = rows.map(row => this.mapProfileViewRowToUser(row));
     const total = count ?? 0;
-
-    // Get UIDs from stats
-    const userUids = (statsData || []).map(stat => stat.user_uid);
-
-    if (userUids.length === 0) {
-      return {
-        data: [],
-        total: 0,
-        page: pagination.page,
-        pageSize: pagination.pageSize,
-        totalPages: 0,
-      };
-    }
-
-    // Fetch user details from Firebase and Firestore
-    const users = await Promise.all(
-      userUids.map(uid => this.getUserByUid(uid))
-    );
-
-    // Filter out nulls and apply additional filters
-    let filteredUsers = users.filter((user): user is User => user !== null);
-
-    // Apply role filter
-    if (filters.role) {
-      filteredUsers = filteredUsers.filter(user => user.role === filters.role);
-    }
-
-    // Apply verification status filter
-    if (filters.verificationStatus) {
-      filteredUsers = filteredUsers.filter(
-        user => user.riderVerificationStatus === filters.verificationStatus
-      );
-    }
-
-    // Apply query filter (search in email, displayName)
-    if (filters.query) {
-      const queryLower = filters.query.toLowerCase();
-      filteredUsers = filteredUsers.filter(user =>
-        user.email?.toLowerCase().includes(queryLower) ||
-        user.displayName?.toLowerCase().includes(queryLower)
-      );
-    }
-
     const totalPages = Math.ceil(total / pagination.pageSize);
 
     return {
-      data: filteredUsers,
+      data: resultUsers,
       total,
       page: pagination.page,
       pageSize: pagination.pageSize,
@@ -147,40 +116,20 @@ export class UsersRepository {
    * Fetches from Firebase Auth, Firestore, and Supabase
    */
   async getUserByUid(uid: string): Promise<User | null> {
-    try {
-      // Fetch from Firebase Auth
-      const userRecord = await authAdmin.getUser(uid);
+    const { data, error } = await supabase
+      .from('user_profiles_complete')
+      .select('*')
+      .eq('uid', uid)
+      .single();
 
-      // Fetch from Firestore for profile data
-      const userDoc = await firestoreAdmin.collection('users').doc(uid).get();
-      const userData = userDoc.data();
-
-      // Fetch from Supabase for stats
-      const { data: statsData, error: statsError } = await supabase
-        .from('user_stats')
-        .select('*')
-        .eq('user_uid', uid)
-        .single();
-
-      // If no stats exist, create default stats
-      const stats = statsData || {
-        trust_score: 0,
-        total_rides: 0,
-        completed_rides: 0,
-        average_rating: 0,
-        cancellations: 0,
-        late_cancellations: 0,
-        no_shows: 0,
-      };
-
-      return this.mapToUser(userRecord, userData, stats);
-    } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
+    if (error) {
+      if (error.code === 'PGRST116') {
         return null;
       }
-      console.error('Failed to get user:', error);
       throw new Error(`Failed to get user: ${error.message}`);
     }
+
+    return this.mapProfileViewRowToUser(data as any);
   }
 
   /**
@@ -192,30 +141,63 @@ export class UsersRepository {
     note: string | undefined,
     adminUid: string
   ): Promise<void> {
-    // Get current user data for audit log
     const beforeUser = await this.getUserByUid(uid);
     if (!beforeUser) {
       throw new Error('User not found');
     }
 
-    // Update Firestore
-    const userRef = firestoreAdmin.collection('users').doc(uid);
-    const updateData: any = {
-      riderVerificationStatus: approved ? 'approved' : 'rejected',
-      isRiderVerified: approved,
-      updatedAt: new Date(),
-    };
-
-    if (note) {
-      updateData.verificationNote = note;
+    if (approved) {
+      const { error } = await supabase.rpc('approve_rider_verification', {
+        target_uid: uid,
+        admin_uid: adminUid,
+      });
+      if (error) {
+        if ((error.message || '').includes('Only admins')) {
+          const { error: upErr } = await supabase
+            .from('users')
+            .update({
+              rider_verification_status: 'approved',
+              is_rider_verified: true,
+              verification_reviewed_at: new Date().toISOString(),
+              verification_reviewed_by: adminUid,
+            })
+            .eq('uid', uid);
+          if (upErr) {
+            throw new Error(`Failed to approve verification (fallback): ${upErr.message}`);
+          }
+        } else {
+          throw new Error(`Failed to approve verification: ${error.message}`);
+        }
+      }
+    } else {
+      const { error } = await supabase.rpc('reject_rider_verification', {
+        target_uid: uid,
+        admin_uid: adminUid,
+        rejection_reason: note ?? '',
+      });
+      if (error) {
+        if ((error.message || '').includes('Only admins')) {
+          const { error: upErr } = await supabase
+            .from('users')
+            .update({
+              rider_verification_status: 'rejected',
+              is_rider_verified: false,
+              verification_rejection_reason: note ?? '',
+              verification_reviewed_at: new Date().toISOString(),
+              verification_reviewed_by: adminUid,
+            })
+            .eq('uid', uid);
+          if (upErr) {
+            throw new Error(`Failed to reject verification (fallback): ${upErr.message}`);
+          }
+        } else {
+          throw new Error(`Failed to reject verification: ${error.message}`);
+        }
+      }
     }
 
-    await userRef.update(updateData);
-
-    // Get updated user data
     const afterUser = await this.getUserByUid(uid);
 
-    // Log audit action
     await auditRepo.logAction({
       adminUid,
       action: approved ? 'verify_rider_approved' : 'verify_rider_rejected',
@@ -292,18 +274,12 @@ export class UsersRepository {
       throw new Error('User not found');
     }
 
-    // Soft delete: disable in Firebase Auth
-    await authAdmin.updateUser(uid, {
-      disabled: true,
+    const { data, error } = await supabase.rpc('delete_user_completely', {
+      target_uid: uid,
     });
-
-    // Mark as deleted in Firestore
-    const userRef = firestoreAdmin.collection('users').doc(uid);
-    await userRef.update({
-      isDeleted: true,
-      deletedAt: new Date(),
-      updatedAt: new Date(),
-    });
+    if (error) {
+      throw new Error(`Failed to delete user: ${error.message}`);
+    }
 
     // Log audit action
     await auditRepo.logAction({
@@ -316,9 +292,7 @@ export class UsersRepository {
           email: beforeUser.email,
           displayName: beforeUser.displayName,
         },
-        after: {
-          isDeleted: true,
-        },
+        after: data ?? { success: true },
       },
     });
   }
@@ -334,9 +308,9 @@ export class UsersRepository {
     return {
       uid: userRecord.uid,
       email: userRecord.email || null,
-      displayName: userRecord.displayName || null,
-      photoURL: userRecord.photoURL || null,
-      phoneNumber: userRecord.phoneNumber || null,
+      displayName: (firestoreData?.name ?? firestoreData?.displayName ?? userRecord.displayName) || null,
+      photoURL: (firestoreData?.profileImageUrl ?? firestoreData?.photoURL ?? userRecord.photoURL) || null,
+      phoneNumber: (firestoreData?.phone ?? userRecord.phoneNumber) || null,
       role: firestoreData?.role || 'passenger',
       isRiderVerified: firestoreData?.isRiderVerified || false,
       riderVerificationStatus: firestoreData?.riderVerificationStatus || null,
@@ -350,6 +324,35 @@ export class UsersRepository {
       cancellations: stats.cancellations || 0,
       lateCancellations: stats.late_cancellations || 0,
       noShows: stats.no_shows || 0,
+      verificationImages: firestoreData?.bikeImageUrl ? { bikePhoto: firestoreData.bikeImageUrl } : undefined,
+      verificationDetails: firestoreData?.bikeModel ? { vehicleModel: firestoreData.bikeModel } : undefined,
+    };
+  }
+
+  private mapProfileViewRowToUser(row: any): User {
+    const completedRides = (row.completed_rides_as_rider ?? 0) + (row.completed_rides_as_passenger ?? 0);
+    const totalRides = row.total_rides ?? ((row.total_rides_as_rider ?? 0) + (row.total_rides_as_passenger ?? 0));
+    return {
+      uid: row.uid,
+      email: row.email ?? null,
+      displayName: row.name ?? null,
+      photoURL: row.profile_image_url ?? null,
+      phoneNumber: row.phone ?? null,
+      role: (row.role as 'rider' | 'passenger') ?? 'passenger',
+      isRiderVerified: !!row.is_rider_verified,
+      riderVerificationStatus: row.rider_verification_status ?? null,
+      isBanned: !!row.is_suspended,
+      banReason: row.suspension_reason ?? null,
+      createdAt: new Date(row.created_at),
+      trustScore: row.trust_score ?? 0,
+      totalRides,
+      completedRides,
+      averageRating: row.average_rating ?? 0,
+      cancellations: row.cancelled_rides_as_rider ?? 0,
+      lateCancellations: row.late_cancellations_count ?? 0,
+      noShows: row.no_show_count ?? 0,
+      verificationImages: row.bike_image_url ? { bikePhoto: row.bike_image_url } : undefined,
+      verificationDetails: row.bike_model ? { vehicleModel: row.bike_model } : undefined,
     };
   }
 }

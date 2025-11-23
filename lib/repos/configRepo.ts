@@ -1,4 +1,5 @@
 import { firestoreAdmin } from '@/lib/firebase/admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { auditRepo } from './auditRepo';
 
 /**
@@ -7,6 +8,11 @@ import { auditRepo } from './auditRepo';
 export interface AppConfig {
   minVersion: string;
   flags: Record<string, boolean>;
+  isMaintenanceMode: boolean;
+  maintenanceMessage: string;
+  isUpdateRequired: boolean;
+  latestBuildNumber: string;
+  latestVersion: string;
 }
 
 /**
@@ -15,6 +21,11 @@ export interface AppConfig {
 export interface UpdateConfigInput {
   minVersion?: string;
   flags?: Record<string, boolean>;
+  isMaintenanceMode?: boolean;
+  maintenanceMessage?: string;
+  isUpdateRequired?: boolean;
+  latestBuildNumber?: string;
+  latestVersion?: string;
 }
 
 /**
@@ -23,7 +34,8 @@ export interface UpdateConfigInput {
  */
 export class ConfigRepository {
   private readonly collectionName = 'app_config';
-  private readonly docId = 'config';
+  private readonly primaryDocId = 'version';
+  private readonly fallbackDocId = 'config';
 
   /**
    * Get the current application configuration
@@ -31,21 +43,35 @@ export class ConfigRepository {
    */
   async getConfig(): Promise<AppConfig> {
     try {
-      const docRef = firestoreAdmin.collection(this.collectionName).doc(this.docId);
-      const doc = await docRef.get();
+      const versionRef = firestoreAdmin.collection(this.collectionName).doc(this.primaryDocId);
+      let doc = await versionRef.get();
 
       if (!doc.exists) {
-        // Return default config if document doesn't exist
+        const fallbackRef = firestoreAdmin.collection(this.collectionName).doc(this.fallbackDocId);
+        doc = await fallbackRef.get();
+      }
+
+      if (!doc.exists) {
         return {
           minVersion: '1.0.0',
           flags: {},
+          isMaintenanceMode: false,
+          maintenanceMessage: '',
+          isUpdateRequired: false,
+          latestBuildNumber: '0',
+          latestVersion: '1.0.0',
         };
       }
 
       const data = doc.data();
       return {
-        minVersion: data?.minVersion || '1.0.0',
+        minVersion: data?.minVersion || data?.latestVersion || '1.0.0',
         flags: data?.flags || {},
+        isMaintenanceMode: data?.isMaintenanceMode ?? data?.is_maintenance_mode ?? false,
+        maintenanceMessage: data?.maintenanceMessage ?? data?.maintenance_message ?? '',
+        isUpdateRequired: data?.isUpdateRequired ?? data?.is_update_required ?? false,
+        latestBuildNumber: data?.latestBuildNumber ?? data?.latest_build_number ?? '0',
+        latestVersion: data?.latestVersion ?? data?.latest_version ?? data?.minVersion ?? '1.0.0',
       };
     } catch (error) {
       console.error('Failed to get app config:', error);
@@ -64,9 +90,9 @@ export class ConfigRepository {
       // Get current config for audit logging
       const currentConfig = await this.getConfig();
 
-      const docRef = firestoreAdmin.collection(this.collectionName).doc(this.docId);
+      const docRef = firestoreAdmin.collection(this.collectionName).doc(this.primaryDocId);
 
-      // Build update object
+      // Build update object (camelCase for in-memory typing)
       const updateData: Partial<AppConfig> = {};
 
       if (updates.minVersion !== undefined) {
@@ -81,8 +107,46 @@ export class ConfigRepository {
         };
       }
 
-      // Update Firestore document
-      await docRef.set(updateData, { merge: true });
+      if (updates.isMaintenanceMode !== undefined) {
+        updateData.isMaintenanceMode = updates.isMaintenanceMode;
+      }
+      if (updates.maintenanceMessage !== undefined) {
+        updateData.maintenanceMessage = updates.maintenanceMessage;
+      }
+      if (updates.isUpdateRequired !== undefined) {
+        updateData.isUpdateRequired = updates.isUpdateRequired;
+      }
+      if (updates.latestBuildNumber !== undefined) {
+        updateData.latestBuildNumber = updates.latestBuildNumber;
+      }
+      if (updates.latestVersion !== undefined) {
+        updateData.latestVersion = updates.latestVersion;
+      }
+
+      // Persist using snake_case keys to match existing Firestore schema
+      const snakeUpdate: Record<string, any> = {};
+      if (updateData.minVersion !== undefined) snakeUpdate.minVersion = updateData.minVersion;
+      if (updateData.flags !== undefined) snakeUpdate.flags = updateData.flags;
+      if (updates.isMaintenanceMode !== undefined) snakeUpdate.is_maintenance_mode = updates.isMaintenanceMode;
+      if (updates.maintenanceMessage !== undefined) snakeUpdate.maintenance_message = updates.maintenanceMessage;
+      if (updates.isUpdateRequired !== undefined) snakeUpdate.is_update_required = updates.isUpdateRequired;
+      if (updates.latestBuildNumber !== undefined) snakeUpdate.latest_build_number = updates.latestBuildNumber;
+      if (updates.latestVersion !== undefined) snakeUpdate.latest_version = updates.latestVersion;
+
+      await docRef.set(snakeUpdate, { merge: true });
+
+      // Clean up camelCase duplicates if they exist
+      try {
+        await docRef.update({
+          isMaintenanceMode: FieldValue.delete(),
+          maintenanceMessage: FieldValue.delete(),
+          isUpdateRequired: FieldValue.delete(),
+          latestBuildNumber: FieldValue.delete(),
+          latestVersion: FieldValue.delete(),
+        });
+      } catch (_) {
+        // ignore
+      }
 
       // Get updated config
       const updatedConfig = await this.getConfig();
@@ -92,7 +156,7 @@ export class ConfigRepository {
         adminUid,
         action: 'update_config',
         entityType: 'app_config',
-        entityId: this.docId,
+        entityId: this.primaryDocId,
         diff: {
           before: currentConfig,
           after: updatedConfig,

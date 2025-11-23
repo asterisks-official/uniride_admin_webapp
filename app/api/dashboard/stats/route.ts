@@ -106,17 +106,33 @@ async function getTotalUsers(): Promise<number> {
  * Get number of active rides
  */
 async function getActiveRides(): Promise<number> {
-  const { count, error } = await supabase
-    .from('rides')
-    .select('*', { count: 'exact', head: true })
-    .in('status', ['active', 'matched', 'confirmed', 'ongoing']);
+  try {
+    // Primary attempt: use OR filter and lightweight select
+    const { count, error } = await supabase
+      .from('rides')
+      .select('id', { count: 'exact', head: true })
+      .or('status.eq.active,status.eq.matched,status.eq.confirmed,status.eq.ongoing');
 
-  if (error) {
-    console.error('Failed to count active rides:', error);
+    if (error) {
+      console.warn('Active rides head-count failed, retrying without head:', error);
+      // Fallback: retry without head to allow PostgREST to return count even if filters are complex
+      const { count: retryCount, error: retryError } = await supabase
+        .from('rides')
+        .select('id', { count: 'exact' })
+        .or('status.eq.active,status.eq.matched,status.eq.confirmed,status.eq.ongoing');
+
+      if (retryError) {
+        console.error('Failed to count active rides:', retryError);
+        return 0;
+      }
+      return retryCount ?? 0;
+    }
+
+    return count ?? 0;
+  } catch (err) {
+    console.error('Unexpected error counting active rides:', err);
     return 0;
   }
-
-  return count ?? 0;
 }
 
 /**

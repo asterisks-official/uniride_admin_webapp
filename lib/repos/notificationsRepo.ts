@@ -26,6 +26,7 @@ export interface BroadcastPayload {
   message: string;
   segment?: string;
   userUids?: string[];
+  type?: NotificationType;
   actionData?: Record<string, any>;
 }
 
@@ -100,7 +101,7 @@ export class NotificationsRepository {
     // Create notification records for all targeted users
     const notificationInserts: NotificationInsert[] = targetUserUids.map((userUid) => ({
       user_uid: userUid,
-      type: 'admin_broadcast',
+      type: (payload.type || 'admin_broadcast') as NotificationType,
       title: payload.title,
       message: payload.message,
       action_data: payload.actionData ? JSON.parse(JSON.stringify(payload.actionData)) : null,
@@ -109,7 +110,7 @@ export class NotificationsRepository {
 
     const { error: insertError } = await supabase
       .from('notifications')
-      .insert(notificationInserts);
+      .insert(notificationInserts as any);
 
     if (insertError) {
       console.error('Failed to insert notification records:', insertError);
@@ -152,7 +153,7 @@ export class NotificationsRepository {
    * @returns Promise that resolves when notification is marked as read
    */
   async markAsRead(id: string): Promise<void> {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('notifications')
       .update({ is_read: true, updated_at: new Date().toISOString() })
       .eq('id', id);
@@ -251,7 +252,7 @@ export class NotificationsRepository {
       throw new Error(`Failed to fetch all user UIDs: ${error.message}`);
     }
 
-    return (data || []).map((row) => row.user_uid);
+    return ((data || []) as { user_uid: string }[]).map((row) => row.user_uid);
   }
 
   /**
@@ -290,7 +291,7 @@ export class NotificationsRepository {
       throw new Error(`Failed to fetch user UIDs by segment: ${error.message}`);
     }
 
-    return (data || []).map((row) => row.user_uid);
+    return ((data || []) as { user_uid: string }[]).map((row) => row.user_uid);
   }
 
   /**

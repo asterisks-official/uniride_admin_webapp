@@ -1,10 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Database } from './types';
 
 // This module is CLIENT-SIDE and uses the anon key (safe to expose)
 // It's used for Realtime subscriptions and client-side queries
 
-let supabaseClientInstance: SupabaseClient<Database> | null = null;
+let supabaseClientInstance: SupabaseClient<any> | null = null;
 
 // Check if running in browser environment
 function isBrowser(): boolean {
@@ -25,14 +24,14 @@ function validateEnv(): void {
 }
 
 // Initialize Supabase client with anon key (lazy)
-function createSupabaseClient(): SupabaseClient<Database> {
+function createSupabaseClient(): SupabaseClient<any> {
   if (supabaseClientInstance) {
     return supabaseClientInstance;
   }
 
   validateEnv();
 
-  supabaseClientInstance = createClient<Database>(
+  supabaseClientInstance = createClient<any>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -52,18 +51,18 @@ function createSupabaseClient(): SupabaseClient<Database> {
 }
 
 // Export lazy-initialized Supabase client instance
-export function getSupabaseClient(): SupabaseClient<Database> {
+export function getSupabaseClient(): SupabaseClient<any> {
   return createSupabaseClient();
 }
 
 // Export singleton for backward compatibility using Proxy
-export const supabaseClient = new Proxy({} as SupabaseClient<Database>, {
+export const supabaseClient = new Proxy({} as SupabaseClient<any>, {
   get(target, prop) {
     if (!isBrowser()) {
       throw new Error('Supabase client cannot be accessed during SSR');
     }
     const client = getSupabaseClient();
-    const value = client[prop as keyof SupabaseClient<Database>];
+    const value = client[prop as keyof SupabaseClient<any>];
     // Bind methods to the client instance
     if (typeof value === 'function') {
       return value.bind(client);

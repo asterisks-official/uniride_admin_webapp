@@ -301,19 +301,6 @@ export type DismissReportInput = z.infer<typeof dismissReportSchema>;
 // ============================================================================
 
 /**
- * Broadcast notification schema
- */
-export const broadcastNotificationSchema = z.object({
-  title: z.string().min(1).max(100),
-  message: z.string().min(1).max(500),
-  segment: z.string().optional(),
-  userUids: z.array(z.string()).optional(),
-  actionData: z.record(z.any()).optional(),
-});
-
-export type BroadcastNotificationInput = z.infer<typeof broadcastNotificationSchema>;
-
-/**
  * Notification type schema (unified schema with 11 values)
  */
 export const notificationTypeSchema = z.enum([
@@ -343,6 +330,20 @@ export const notificationFiltersSchema = z.object({
 
 export type NotificationFiltersInput = z.infer<typeof notificationFiltersSchema>;
 
+/**
+ * Broadcast notification schema
+ */
+export const broadcastNotificationSchema = z.object({
+  title: z.string().min(1).max(100),
+  message: z.string().min(1).max(500),
+  segment: z.string().optional(),
+  userUids: z.array(z.string()).optional(),
+  type: notificationTypeSchema.optional(),
+  actionData: z.record(z.string(), z.any()).optional(),
+});
+
+export type BroadcastNotificationInput = z.infer<typeof broadcastNotificationSchema>;
+
 // ============================================================================
 // App Configuration Schemas (Requirement 8.1)
 // ============================================================================
@@ -352,7 +353,12 @@ export type NotificationFiltersInput = z.infer<typeof notificationFiltersSchema>
  */
 export const updateConfigSchema = z.object({
   minVersion: z.string().regex(/^\d+\.\d+\.\d+$/, 'Must be valid semver (e.g., 1.0.0)').optional(),
-  flags: z.record(z.boolean()).optional(),
+  flags: z.record(z.string(), z.boolean()).optional(),
+  isMaintenanceMode: z.boolean().optional(),
+  maintenanceMessage: z.string().max(500).optional(),
+  isUpdateRequired: z.boolean().optional(),
+  latestBuildNumber: z.string().optional(),
+  latestVersion: z.string().regex(/^\d+\.\d+\.\d+$/, 'Must be valid semver (e.g., 1.0.0)').optional(),
 });
 
 export type UpdateConfigInput = z.infer<typeof updateConfigSchema>;

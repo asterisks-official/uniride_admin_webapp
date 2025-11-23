@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/utils/apiClient';
+import { formatCurrency } from '@/utils/formatting';
 import { triggerCSVExport } from '@/lib/utils/exportHelpers';
 import { subscribeToRides, unsubscribe } from '@/lib/realtime/supabase';
 import type { Database } from '@/lib/supabase/types';
@@ -466,7 +467,7 @@ export default function RidesPage() {
                           {ride.seatsAvailable} / {ride.seatsTotal}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          ${ride.price.toFixed(2)}
+                          {formatCurrency(ride.price)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(ride.status)}`}>

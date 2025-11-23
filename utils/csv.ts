@@ -55,7 +55,7 @@ export function generateCSV<T extends Record<string, any>>(
   // Add data rows
   for (const item of data) {
     const row = exportFields.map(field => {
-      const value = item[field]
+      const value = item[field] as any
       
       // Format dates
       if (value instanceof Date) {

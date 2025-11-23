@@ -163,7 +163,33 @@ export class TrustRepository {
 
     if (error) {
       if (error.code === 'PGRST116') {
-        throw new Error('User stats not found');
+        const defaultStats: UserStats = {
+          user_uid: uid,
+          trust_score: 0,
+          total_rides_as_rider: 0,
+          total_rides_as_passenger: 0,
+          completed_rides_as_rider: 0,
+          completed_rides_as_passenger: 0,
+          cancelled_rides_as_rider: 0,
+          cancelled_rides_as_passenger: 0,
+          average_rating_as_rider: 0,
+          average_rating_as_passenger: 0,
+          total_ratings_received_as_rider: 0,
+          total_ratings_received_as_passenger: 0,
+          late_cancellations_count: 0,
+          no_show_count: 0,
+          total_earnings: 0,
+        };
+
+        try {
+          await supabase
+            .from('user_stats')
+            .insert({ user_uid: uid });
+        } catch (insertErr) {
+          // Do not fail if insert is blocked; proceed with defaults
+        }
+
+        return this.calculateTrustScoreDetailed(defaultStats);
       }
       console.error('Failed to get user stats:', error);
       throw new Error(`Failed to get user stats: ${error.message}`);

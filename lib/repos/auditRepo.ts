@@ -76,7 +76,7 @@ export class AuditRepository {
 
     const { error } = await supabase
       .from('admin_audit_log')
-      .insert(insertData);
+      .insert(insertData as any);
 
     if (error) {
       console.error('Failed to log audit action:', error);

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/utils/apiClient';
+import { formatCurrency } from '@/utils/formatting';
 
 interface Ride {
   id: string;
@@ -521,10 +522,10 @@ export default function RideDetailPage() {
                   <span className="text-gray-900">Seats:</span>
                   <span className="font-semibold text-gray-900">{ride.seatsAvailable} / {ride.seatsTotal}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-900">Price:</span>
-                  <span className="font-semibold text-gray-900">${ride.price.toFixed(2)}</span>
-                </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-900">Price:</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(ride.price)}</span>
+                    </div>
                 {ride.rideType && (
                   <div className="flex justify-between">
                     <span className="text-gray-900">Type:</span>
@@ -581,19 +582,19 @@ export default function RideDetailPage() {
                   {ride.earnings !== undefined && (
                     <div className="flex justify-between">
                       <span className="text-gray-900">Rider Earnings:</span>
-                      <span className="font-semibold text-green-600">${ride.earnings.toFixed(2)}</span>
+                      <span className="font-semibold text-green-600">{formatCurrency(ride.earnings)}</span>
                     </div>
                   )}
                   {ride.platformFee !== undefined && (
                     <div className="flex justify-between">
                       <span className="text-gray-900">Platform Fee:</span>
-                      <span className="font-semibold text-gray-900">${ride.platformFee.toFixed(2)}</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(ride.platformFee)}</span>
                     </div>
                   )}
                   {ride.totalAmount !== undefined && (
                     <div className="flex justify-between">
                       <span className="text-gray-900">Total Amount:</span>
-                      <span className="font-bold text-gray-900">${ride.totalAmount.toFixed(2)}</span>
+                      <span className="font-bold text-gray-900">{formatCurrency(ride.totalAmount)}</span>
                     </div>
                   )}
                 </div>
@@ -720,11 +721,11 @@ export default function RideDetailPage() {
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-800">Amount</p>
-                      <p className="text-sm font-semibold text-gray-900">{transaction.currency} {transaction.amount.toFixed(2)}</p>
+                      <p className="text-sm font-semibold text-gray-900">{formatCurrency(transaction.amount)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-800">Platform Fee</p>
-                      <p className="text-sm font-semibold text-gray-900">{transaction.currency} {transaction.platformFee.toFixed(2)}</p>
+                      <p className="text-sm font-semibold text-gray-900">{formatCurrency(transaction.platformFee)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-800">Net Amount</p>
@@ -790,7 +791,7 @@ export default function RideDetailPage() {
                   {cancellation.cancellationFeeApplied && (
                     <div className="flex justify-between">
                       <span className="text-gray-900">Cancellation Fee:</span>
-                      <span className="font-semibold text-red-600">${cancellation.feeAmount.toFixed(2)}</span>
+                      <span className="font-semibold text-red-600">{formatCurrency(cancellation.feeAmount)}</span>
                     </div>
                   )}
                 </>
@@ -798,7 +799,7 @@ export default function RideDetailPage() {
               {!cancellation && ride.cancellationFee && (
                 <div className="flex justify-between">
                   <span className="text-gray-900">Cancellation Fee:</span>
-                  <span className="font-semibold text-gray-900">${ride.cancellationFee.toFixed(2)}</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(ride.cancellationFee)}</span>
                 </div>
               )}
             </div>

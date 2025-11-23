@@ -269,10 +269,10 @@ export default function VerificationDetailPage() {
             
             {user.verificationImages.licensePhoto && (
               <div>
-                <p className="text-sm font-semibold text-gray-800 mb-2">Driver's License</p>
+                <p className="text-sm font-semibold text-gray-800 mb-2">Driver&#39;s License</p>
                 <img
                   src={user.verificationImages.licensePhoto}
-                  alt="Driver's License"
+                  alt="Driver&#39;s License"
                   className="w-full rounded-lg border border-gray-300 cursor-pointer hover:opacity-90"
                   onClick={() => window.open(user.verificationImages!.licensePhoto, '_blank')}
                 />

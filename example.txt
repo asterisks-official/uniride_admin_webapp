@@ -1,0 +1,152 @@
+// lib/admin/services/admin_notification_service.dart
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class AdminNotificationService {
+  static const String _baseUrl = 'https://onesignal.com/api/v1';
+  
+  static String get _appId => dotenv.env['ONESIGNAL_APP_ID'] ?? '';
+  static String get _restApiKey => dotenv.env['ONESIGNAL_REST_API_KEY'] ?? '';
+
+  /// Send notification to specific user by Firebase UID
+  static Future<bool> sendToUser({
+    required String userId,
+    required String title,
+    required String message,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/notifications'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $_restApiKey',
+        },
+        body: jsonEncode({
+          'app_id': _appId,
+          'include_external_user_ids': [userId], // Firebase UID
+          'headings': {'en': title},
+          'contents': {'en': message},
+          'data': data ?? {},
+        }),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error sending notification: $e');
+      return false;
+    }
+  }
+
+  /// Send notification to multiple users
+  static Future<bool> sendToMultipleUsers({
+    required List<String> userIds,
+    required String title,
+    required String message,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/notifications'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $_restApiKey',
+        },
+        body: jsonEncode({
+          'app_id': _appId,
+          'include_external_user_ids': userIds,
+          'headings': {'en': title},
+          'contents': {'en': message},
+          'data': data ?? {},
+        }),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error sending notifications: $e');
+      return false;
+    }
+  }
+
+  /// Send notification to all users (broadcast)
+  static Future<bool> sendToAll({
+    required String title,
+    required String message,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/notifications'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $_restApiKey',
+        },
+        body: jsonEncode({
+          'app_id': _appId,
+          'included_segments': ['All'], // Send to everyone
+          'headings': {'en': title},
+          'contents': {'en': message},
+          'data': data ?? {},
+        }),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error broadcasting notification: $e');
+      return false;
+    }
+  }
+
+  /// Send notification with ride action
+  static Future<bool> sendRideNotification({
+    required String userId,
+    required String title,
+    required String message,
+    required String rideId,
+    String? action, // 'view_ride', 'accept_request', etc.
+  }) async {
+    return sendToUser(
+      userId: userId,
+      title: title,
+      message: message,
+      data: {
+        'type': 'ride',
+        'ride_id': rideId,
+        'action': action ?? 'view_ride',
+      },
+    );
+  }
+}
+
+
+
+exmple :
+// 1. Send to specific user
+await AdminNotificationService.sendToUser(
+  userId: 'firebase_uid_here',
+  title: '🚗 Ride Accepted!',
+  message: 'Your ride request has been accepted',
+);
+
+// 2. Send to multiple users
+await AdminNotificationService.sendToMultipleUsers(
+  userIds: ['uid1', 'uid2', 'uid3'],
+  title: '🎉 Special Offer',
+  message: '50% off on your next ride!',
+);
+
+// 3. Broadcast to all users
+await AdminNotificationService.sendToAll(
+  title: '📢 Announcement',
+  message: 'App maintenance scheduled for tomorrow',
+);
+
+// 4. Send ride notification
+await AdminNotificationService.sendRideNotification(
+  userId: 'firebase_uid',
+  title: '🚗 New Ride Request',
+  message: 'John wants to join your ride',
+  rideId: 'ride_uuid',
+  action: 'view_ride',
+);

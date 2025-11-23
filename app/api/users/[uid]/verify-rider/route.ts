@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminRequest, UnauthorizedError, ForbiddenError } from '@/lib/security/authGuard';
 import { usersRepo } from '@/lib/repos/usersRepo';
+import { notificationsRepo } from '@/lib/repos/notificationsRepo';
 import { verifyRiderSchema } from '@/lib/validation/schemas';
 import { z } from 'zod';
 
@@ -29,6 +30,28 @@ export async function POST(
       validatedData.note,
       decodedToken.uid
     );
+
+    // Send notification to the rider
+    try {
+      await notificationsRepo.broadcastNotification(
+        {
+          title: validatedData.approved ? 'Verification Approved' : 'Verification Rejected',
+          message: validatedData.approved
+            ? 'Your rider verification has been approved. You can now offer rides.'
+            : 'Your rider verification has been rejected. Please review the notes and resubmit.',
+          userUids: [uid],
+          actionData: {
+            type: 'verification',
+            status: validatedData.approved ? 'approved' : 'rejected',
+            note: validatedData.note ?? null,
+          },
+        },
+        decodedToken.uid
+      );
+    } catch (e) {
+      // Log and continue; verification should not fail due to notification delivery
+      console.error('Failed to send verification notification:', e);
+    }
 
     return NextResponse.json({
       ok: true,

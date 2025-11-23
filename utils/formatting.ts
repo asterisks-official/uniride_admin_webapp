@@ -76,10 +76,11 @@ export function formatRelativeTime(date: Date | string): string {
  * @param currency - Currency code (default: USD)
  * @returns Formatted currency string
  */
-export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
+export function formatCurrency(amount: number, currency: string = 'BDT'): string {
+  return new Intl.NumberFormat('en-BD', {
     style: 'currency',
     currency,
+    currencyDisplay: 'narrowSymbol',
   }).format(amount);
 }
 

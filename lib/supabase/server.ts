@@ -1,5 +1,4 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Database } from './types';
 
 // This module is SERVER-ONLY and must never be exposed to the client
 // It uses the service role key which has elevated privileges
@@ -18,10 +17,10 @@ function validateEnv(): void {
 }
 
 // Initialize Supabase client with service role key
-function createSupabaseServerClient(): SupabaseClient<Database> {
+function createSupabaseServerClient(): SupabaseClient<any> {
   validateEnv();
 
-  return createClient<Database>(
+  return createClient<any>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {

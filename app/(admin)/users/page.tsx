@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/utils/apiClient';
 import { triggerCSVExport } from '@/lib/utils/exportHelpers';
-import { subscribeToRiderVerificationQueue } from '@/lib/realtime/firestore';
-import type { FirestoreUser } from '@/lib/realtime/firestore';
+import { subscribeToPendingVerifications, unsubscribe } from '@/lib/realtime/supabase';
+import { supabaseClient } from '@/lib/supabase/client';
 
 interface User {
   uid: string;
@@ -64,25 +64,29 @@ export default function UsersPage() {
 
   // Real-time subscription for rider verification queue
   useEffect(() => {
-    const unsubscribe = subscribeToRiderVerificationQueue(
-      (pendingUsers: FirestoreUser[]) => {
-        setPendingVerificationCount(pendingUsers.length);
-        
-        // If we're viewing pending verifications, update the list
-        if (filters.verificationStatus === 'pending') {
-          setIsLive(true);
-          setTimeout(() => setIsLive(false), 2000);
-          // Optionally refresh the full list to get updated data
-          fetchUsers();
-        }
-      },
-      (error) => {
-        console.error('Verification queue subscription error:', error);
+    const fetchPendingCount = async () => {
+      const { count, error } = await supabaseClient
+        .from('users')
+        .select('uid', { count: 'exact', head: true })
+        .eq('rider_verification_status', 'pending');
+      if (!error && typeof count === 'number') {
+        setPendingVerificationCount(count);
       }
-    );
+    };
+
+    fetchPendingCount();
+
+    const channel = subscribeToPendingVerifications(async () => {
+      await fetchPendingCount();
+      if (filters.verificationStatus === 'pending') {
+        setIsLive(true);
+        setTimeout(() => setIsLive(false), 2000);
+        fetchUsers();
+      }
+    });
 
     return () => {
-      unsubscribe();
+      unsubscribe(channel);
     };
   }, [filters.verificationStatus]);
 

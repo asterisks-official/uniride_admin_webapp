@@ -6,6 +6,7 @@ import { Database } from '@/lib/supabase/types';
 type RideRow = Database['public']['Tables']['rides']['Row'];
 type RequestRow = Database['public']['Tables']['ride_requests']['Row'];
 type NotificationRow = Database['public']['Tables']['notifications']['Row'];
+type UserRow = Database['public']['Tables']['users']['Row'];
 
 /**
  * Subscribe to ride status changes
@@ -59,8 +60,8 @@ export function subscribeToRides(
           table: 'rides',
         },
         (payload: RealtimePostgresChangesPayload<RideRow>) => {
-          if (onDelete && payload.old) {
-            onDelete(payload.old);
+          if (onDelete && payload.old && 'id' in payload.old) {
+            onDelete(payload.old as RideRow);
           }
         }
       )
@@ -98,8 +99,8 @@ export function subscribeToRideById(
           filter: `id=eq.${rideId}`,
         },
         (payload: RealtimePostgresChangesPayload<RideRow>) => {
-          if (payload.new) {
-            onUpdate(payload.new);
+          if (payload.new && 'id' in payload.new) {
+            onUpdate(payload.new as RideRow);
           }
         }
       )
@@ -138,8 +139,8 @@ export function subscribeToRideRequests(
           table: 'ride_requests',
         },
         (payload: RealtimePostgresChangesPayload<RequestRow>) => {
-          if (onInsert && payload.new) {
-            onInsert(payload.new);
+          if (onInsert && payload.new && 'id' in payload.new) {
+            onInsert(payload.new as RequestRow);
           }
         }
       )
@@ -151,8 +152,8 @@ export function subscribeToRideRequests(
           table: 'ride_requests',
         },
         (payload: RealtimePostgresChangesPayload<RequestRow>) => {
-          if (onUpdate && payload.new) {
-            onUpdate(payload.new);
+          if (onUpdate && payload.new && 'id' in payload.new) {
+            onUpdate(payload.new as RequestRow);
           }
         }
       )
@@ -164,8 +165,8 @@ export function subscribeToRideRequests(
           table: 'ride_requests',
         },
         (payload: RealtimePostgresChangesPayload<RequestRow>) => {
-          if (onDelete && payload.old) {
-            onDelete(payload.old);
+          if (onDelete && payload.old && 'id' in payload.old) {
+            onDelete(payload.old as RequestRow);
           }
         }
       )
@@ -204,8 +205,8 @@ export function subscribeToRideRequestsByRideId(
           filter: `ride_id=eq.${rideId}`,
         },
         (payload: RealtimePostgresChangesPayload<RequestRow>) => {
-          if (onInsert && payload.new) {
-            onInsert(payload.new);
+          if (onInsert && payload.new && 'id' in payload.new) {
+            onInsert(payload.new as RequestRow);
           }
         }
       )
@@ -218,8 +219,8 @@ export function subscribeToRideRequestsByRideId(
           filter: `ride_id=eq.${rideId}`,
         },
         (payload: RealtimePostgresChangesPayload<RequestRow>) => {
-          if (onUpdate && payload.new) {
-            onUpdate(payload.new);
+          if (onUpdate && payload.new && 'id' in payload.new) {
+            onUpdate(payload.new as RequestRow);
           }
         }
       )
@@ -260,7 +261,7 @@ export function subscribeToUserNotifications(
         },
         (payload: RealtimePostgresChangesPayload<NotificationRow>) => {
           if (onInsert && payload.new) {
-            onInsert(payload.new);
+            onInsert(payload.new as NotificationRow);
           }
         }
       )
@@ -274,7 +275,7 @@ export function subscribeToUserNotifications(
         },
         (payload: RealtimePostgresChangesPayload<NotificationRow>) => {
           if (onUpdate && payload.new) {
-            onUpdate(payload.new);
+            onUpdate(payload.new as NotificationRow);
           }
         }
       )
@@ -312,7 +313,7 @@ export function subscribeToAllNotifications(
         },
         (payload: RealtimePostgresChangesPayload<NotificationRow>) => {
           if (payload.new) {
-            onInsert(payload.new);
+            onInsert(payload.new as NotificationRow);
           }
         }
       )
@@ -321,6 +322,34 @@ export function subscribeToAllNotifications(
     return channel;
   } catch (error) {
     console.error('Failed to create Supabase subscription:', error);
+    return null;
+  }
+}
+
+export function subscribeToPendingVerifications(
+  onChange: () => void
+): RealtimeChannel | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const channel = supabaseClient
+      .channel('pending-verifications')
+      .on<UserRow>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'users',
+          filter: 'rider_verification_status=eq.pending',
+        },
+        () => {
+          onChange();
+        }
+      )
+      .subscribe();
+    return channel;
+  } catch (error) {
     return null;
   }
 }
