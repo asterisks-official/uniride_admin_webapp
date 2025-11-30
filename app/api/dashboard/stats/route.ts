@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
  */
 async function getTotalUsers(): Promise<number> {
   const { count, error } = await supabase
-    .from('user_stats')
+    .from('users')
     .select('*', { count: 'exact', head: true });
 
   if (error) {
@@ -225,9 +225,12 @@ async function getTrustDistribution(): Promise<{
   fair: number;
   poor: number;
 }> {
+  // Query from user_stats where trust_score exists
+  // Users without stats (new users) won't have trust scores yet
   const { data, error } = await supabase
     .from('user_stats')
-    .select('trust_score');
+    .select('trust_score')
+    .not('trust_score', 'is', null);
 
   if (error) {
     console.error('Failed to fetch trust scores:', error);
